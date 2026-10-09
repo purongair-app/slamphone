@@ -1,0 +1,155 @@
+/* MobileHub / สลาม โมบาย — Google Apps Script backend */
+var OWNER_ = 'slam.mobay96000@gmail.com';
+var PUBLIC_ = 'https://purongair-app.github.io/slamphone/';
+var LISTS_ = ['repairs','products','sales','customers','finance','employees','services','transfers','installments','consignments','movements','prices','attendance','payroll'];
+
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  var boot = {mode:['login','register','verify','reset'].indexOf(p.mode)>=0?p.mode:'login',token:String(p.token||'').slice(0,100),email:String(p.email||'').slice(0,254)};
+  var html = '<!doctype html><html lang="th"><head><base target="_blank"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="'+PUBLIC_+'styles.css?v=1"></head><body><div id="root"><p style="text-align:center;padding:50px;font-family:Tahoma">กำลังเปิดระบบ สลาม โมบาย…</p></div><script>window.MOBILEHUB_BOOT='+JSON.stringify(boot).replace(/</g,'\\u003c')+';</script><script src="'+PUBLIC_+'app.js?v=1"></script></body></html>';
+  return HtmlService.createHtmlOutput(html).setTitle('สลาม โมบาย · MobileHub').addMetaTag('viewport','width=device-width,initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function setupMobileHub() {
+  if(Session.getActiveUser().getEmail().toLowerCase()!==OWNER_)throw Error('ต้องเรียกใช้จากบัญชีเจ้าของร้านเท่านั้น');
+  var props=PropertiesService.getScriptProperties();
+  if(!props.getProperty('AUTH_FILE_ID')){
+    var folder=DriveApp.createFolder('MobileHub - สลาม โมบาย');
+    var owner={id:Utilities.getUuid(),email:OWNER_,name:'เจ้าของร้าน',phone:'',role:'owner',status:'approved',verified:1,created:new Date().toISOString(),passwordHash:''};
+    var auth=folder.createFile('mobilehub-accounts.json',JSON.stringify({users:[owner],sessions:{},tokens:{},mails:[]}),MimeType.PLAIN_TEXT);
+    var state=folder.createFile('mobilehub-store.json',JSON.stringify({revision:0,data:fresh_()}),MimeType.PLAIN_TEXT);
+    props.setProperties({FOLDER_ID:folder.getId(),AUTH_FILE_ID:auth.getId(),STORE_FILE_ID:state.getId(),PEPPER:token_()});
+  }
+  console.log('ติดตั้ง MobileHub แล้ว: '+PUBLIC_+' | อีเมลเจ้าของร้าน '+OWNER_+' | อีเมลคงเหลือวันนี้ '+MailApp.getRemainingDailyQuota());
+  return {ready:true,ownerEmail:OWNER_,publicUrl:PUBLIC_};
+}
+
+function fresh_(){var data={settings:{lineId:'',taxId:'',branch:'สำนักงานใหญ่',vatMode:'none',logo:'',signature:'',logoSize:'medium',receiptPaper:'80mm',jobPaper:'80mm',footer:'ขอบคุณที่ใช้บริการ',bank:'',accountNo:'',accountName:'',promptpay:'',paymentNote:'กรุณาตรวจสอบชื่อผู้รับเงินก่อนโอน',showPaymentQr:true,showLogo:true,autoPrint:false,costSource:'job',showCosts:true,enableAttendance:false,enablePayroll:false,defaultWarranty:'30 วัน',lineOaUrl:'',name:'สลาม โมบาย',phone:'',address:'',warranty:'รับประกันงานซ่อม 30 วัน เฉพาะอาการเดิม ไม่รวมตก กระแทก หรือโดนน้ำ'}};LISTS_.forEach(function(k){data[k]=[]});return data;}
+function read_(key){var id=PropertiesService.getScriptProperties().getProperty(key);if(!id)throw Error('ระบบยังไม่ได้ติดตั้ง');return JSON.parse(DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8'));}
+function write_(key,data){DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty(key)).setContent(JSON.stringify(data));}
+function token_(){return Utilities.getUuid().replace(/-/g,'')+Utilities.getUuid().replace(/-/g,'');}
+function hex_(bytes){return bytes.map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2)}).join('');}
+function hash_(text){return hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(text),Utilities.Charset.UTF_8));}
+function proof_(value){return hex_(Utilities.computeHmacSha256Signature(String(value),PropertiesService.getScriptProperties().getProperty('PEPPER')));}
+function equal_(a,b){a=String(a||'');b=String(b||'');var n=a.length^b.length;for(var i=0;i<Math.max(a.length,b.length);i++)n|=(a.charCodeAt(i)||0)^(b.charCodeAt(i)||0);return n===0;}
+function email_(v){return String(v||'').trim().toLowerCase();}
+function validEmail_(s){return s.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(s);}
+function fail_(message,status){var e=new Error(message);e.status=status||400;throw e;}
+function limited_(key,limit,seconds){var c=CacheService.getScriptCache(),k='limit:'+hash_(key),n=Number(c.get(k)||0);if(n>=limit)return false;c.put(k,String(n+1),seconds||900);return true;}
+function cleanUser_(u){return {id:u.id,email:u.email,name:u.name,phone:u.phone,role:u.role,status:u.status,verified:u.verified,created:u.created,updated:u.updated};}
+function authUser_(auth,session){var s=auth.sessions[hash_(session||'')];if(!s||s.expires<Date.now())return null;var u=auth.users.filter(function(v){return v.id===s.userId})[0];return u&&u.status==='approved'&&u.verified?u:null;}
+function session_(auth,u){var t=token_();auth.sessions[hash_(t)]={userId:u.id,expires:Date.now()+21600000};return {user:cleanUser_(u),session:t};}
+function revoke_(auth,id){Object.keys(auth.sessions).forEach(function(k){if(auth.sessions[k].userId===id)delete auth.sessions[k]});}
+function requireOwner_(u){if(!u||u.role!=='owner')fail_('เฉพาะเจ้าของร้าน',403);}
+function link_(mode,token,email){return PUBLIC_+'?mode='+mode+'&token='+encodeURIComponent(token)+'&email='+encodeURIComponent(email);}
+function mail_(auth,to,subject,body){auth.mails.unshift({id:Utilities.getUuid(),recipient:to,subject:subject,body:body,status:'queued',attempts:0,created:new Date().toISOString()});if(auth.mails.length>200)auth.mails=auth.mails.slice(0,200);}
+function flush_(auth){var sent=0,failed=0;auth.mails.filter(function(m){return ['queued','error'].indexOf(m.status)>=0&&m.attempts<5}).slice(0,5).forEach(function(m){m.attempts++;try{if(MailApp.getRemainingDailyQuota()<1)throw Error('โควตาส่งอีเมลวันนี้หมด');MailApp.sendEmail({to:m.recipient,subject:m.subject,body:m.body,name:'สลาม โมบาย · MobileHub',replyTo:OWNER_});m.status='sent';m.error='';delete m.body;sent++}catch(e){m.status='error';m.error='ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่ภายหลัง';failed++}});return {configured:true,sent:sent,failed:failed};}
+function verification_(auth,u){var t=token_();auth.tokens[hash_(t)]={userId:u.id,purpose:'verify',expires:Date.now()+86400000};mail_(auth,u.email,'สลาม โมบาย · ยืนยันอีเมลพนักงาน','สวัสดีคุณ '+u.name+'\nกรุณายืนยันอีเมลภายใน 24 ชั่วโมง:\n'+link_('verify',t,u.email)+'\nหลังยืนยันต้องรอเจ้าของร้านอนุมัติก่อนใช้งาน');}
+function validateStore_(s){if(!s||!s.settings||typeof s.settings.name!=='string'||JSON.stringify(s).length>6000000)return false;return LISTS_.every(function(k){if(!Array.isArray(s[k])||s[k].length>10000)return false;var ids={};return s[k].every(function(r){if(!r||typeof r.id!=='string'||ids[r.id])return false;ids[r.id]=true;return Object.keys(r).every(function(f){return ['stock','price','cost','amount','total','deposit','paid','balance','qty','terms','salary','commission'].indexOf(f)<0||(typeof r[f]==='number'&&isFinite(r[f])&&r[f]>=0)})})})&&s.products.every(function(p){return Number.isSafeInteger(p.stock)})&&s.repairs.every(function(r){return ['รับเครื่อง','กำลังตรวจเช็ก','รออะไหล่','กำลังซ่อม','ซ่อมเสร็จ','ส่งคืนแล้ว','ยกเลิก'].indexOf(r.status)>=0});}
+
+function api(request){
+  var lock=LockService.getScriptLock();
+  if(!lock.tryLock(25000))return {status:503,body:{error:'ระบบกำลังบันทึกจากอีกอุปกรณ์ กรุณาลองใหม่'}};
+  try{
+    if(!request||typeof request.path!=='string')fail_('คำขอไม่ถูกต้อง');
+    var auth=read_('AUTH_FILE_ID'),u=authUser_(auth,request.session),b=request.body||{},method=request.method||'GET',path=request.path,result;
+    Object.keys(auth.sessions).forEach(function(k){if(auth.sessions[k].expires<Date.now())delete auth.sessions[k]});
+    Object.keys(auth.tokens).forEach(function(k){if(auth.tokens[k].expires<Date.now())delete auth.tokens[k]});
+    if(path==='/api/auth'){
+      result=authApi_(auth,u,b,method,request.session);
+      if(method!=='GET')write_('AUTH_FILE_ID',auth);
+      return {status:200,body:result};
+    }
+    if(!u)fail_('กรุณาเข้าสู่ระบบ',401);
+    if(path==='/api/store'){
+      var store=read_('STORE_FILE_ID');
+      if(method==='GET')return {status:200,body:store};
+      if(method!=='PUT'||!Number.isSafeInteger(b.revision)||!validateStore_(b.data))fail_('ข้อมูลไม่ถูกต้อง');
+      if(store.revision!==b.revision)fail_('ข้อมูลเปลี่ยนจากอีกอุปกรณ์ กรุณาโหลดใหม่แล้วทำรายการอีกครั้ง',409);
+      if(u.role!=='owner'&&['settings','employees','prices'].some(function(k){return JSON.stringify(b.data[k])!==JSON.stringify(store.data[k])}))fail_('เฉพาะเจ้าของร้านแก้ข้อมูลร้าน พนักงาน และราคาซ่อมได้',403);
+      store={revision:store.revision+1,data:b.data};write_('STORE_FILE_ID',store);return {status:200,body:store};
+    }
+    if(path==='/api/integrations')return {status:200,body:{lineConfigured:false}};
+    requireOwner_(u);
+    if(path==='/api/admin/access'){
+      if(method==='GET')return {status:200,body:{users:auth.users.map(cleanUser_),mails:auth.mails.slice(0,40).map(function(m){return {id:m.id,recipient:m.recipient,subject:m.subject,status:m.status,attempts:m.attempts,error:m.error,created:m.created}}),mail:{sender:OWNER_,keyConfigured:true,recipient:OWNER_},ownerEmail:OWNER_}};
+      result=accessApi_(auth,b);write_('AUTH_FILE_ID',auth);return {status:200,body:result};
+    }
+    if(path==='/api/admin/reset'&&method==='POST'){
+      if(b.confirmation!=='ล้างข้อมูลร้านทั้งหมด')fail_('กรอกข้อความยืนยันให้ถูกต้อง');
+      if(!u.passwordHash||!equal_(proof_(b.passwordProof),u.passwordHash))fail_('กรุณาตั้งรหัสผ่านเจ้าของร้านก่อน และยืนยันรหัสผ่านให้ถูกต้อง',401);
+      var old=read_('STORE_FILE_ID');if(b.revision!==old.revision)fail_('ข้อมูลเปลี่ยนจากอีกอุปกรณ์ กรุณาโหลดใหม่ก่อนรีเซ็ต',409);
+      DriveApp.getFolderById(PropertiesService.getScriptProperties().getProperty('FOLDER_ID')).createFile('backup-before-reset-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json',JSON.stringify(old),MimeType.PLAIN_TEXT);
+      auth.users.forEach(function(v){if(v.role==='staff'){v.status='disabled';revoke_(auth,v.id)}});
+      auth.tokens={};auth.mails.forEach(function(m){if(m.status!=='sent'){m.status='cancelled';delete m.body}});
+      var fresh={revision:old.revision+1,data:fresh_()};write_('STORE_FILE_ID',fresh);write_('AUTH_FILE_ID',auth);return {status:200,body:{message:'รีเซ็ตแล้ว ระบบเก็บไฟล์สำรองก่อนรีเซ็ตใน Google Drive ของร้าน',data:fresh.data,revision:fresh.revision}};
+    }
+    fail_('ไม่พบคำสั่ง',404);
+  }catch(e){return {status:e.status||500,body:{error:e.status?e.message:'ดำเนินการไม่สำเร็จ กรุณาลองใหม่ หรือติดต่อเจ้าของร้าน'}}}finally{lock.releaseLock()}
+}
+
+function authApi_(auth,u,b,method,session){
+  if(method==='GET')return {user:u?cleanUser_(u):null,mailConfigured:true};
+  if(method!=='POST')fail_('คำขอไม่ถูกต้อง');
+  var action=b.action,email=email_(b.email),account=auth.users.filter(function(v){return v.email===email})[0];
+  if(action==='logout'){delete auth.sessions[hash_(session||'')];return {message:'ออกจากระบบแล้ว'}}
+  if(action==='owner-password'){
+    requireOwner_(u);if(!/^[a-f0-9]{64}$/.test(b.passwordProof||''))fail_('รหัสผ่านไม่ถูกต้อง');u.passwordHash=proof_(b.passwordProof);u.updated=new Date().toISOString();return {message:'ตั้งรหัสผ่านเจ้าของร้านแล้ว',email:OWNER_};
+  }
+  if(action==='owner-code'){
+    if(!limited_('owner-code',3,600))fail_('ส่งรหัสไปแล้ว กรุณารอ 10 นาทีก่อนขอใหม่',429);
+    var code=String(parseInt(token_().slice(0,10),16)%1000000).padStart(6,'0');
+    var cache=CacheService.getScriptCache();cache.put('owner-code',hash_(code),600);cache.put('owner-tries','0',600);
+    MailApp.sendEmail({to:OWNER_,subject:'สลาม โมบาย · รหัสเข้าสู่ระบบเจ้าของร้าน',body:'รหัสเข้าสู่ระบบ MobileHub ของคุณ: '+code+'\nรหัสมีอายุ 10 นาที ใช้ได้ครั้งเดียว\n'+PUBLIC_+'\nอย่าส่งรหัสนี้ให้ผู้อื่น',name:'สลาม โมบาย · MobileHub'});
+    return {message:'ส่งรหัส 6 หลักไปยัง '+OWNER_+' แล้ว กรุณาตรวจ Inbox และสแปม'};
+  }
+  if(action==='owner-verify'){
+    var c=CacheService.getScriptCache(),tries=Number(c.get('owner-tries')||0);c.put('owner-tries',String(tries+1),600);
+    var expected=c.get('owner-code');if(tries>=5||!expected||!equal_(hash_(b.code||''),expected))fail_('รหัสไม่ถูกต้องหรือหมดอายุ กรุณาขอรหัสใหม่',401);
+    c.remove('owner-code');return session_(auth,auth.users.filter(function(v){return v.role==='owner'})[0]);
+  }
+  if(action==='login'){
+    if(!limited_('login:'+email,10,900))fail_('ลองเข้าสู่ระบบหลายครั้ง กรุณารอ 15 นาที',429);
+    if(!account||!account.passwordHash||!equal_(proof_(b.passwordProof),account.passwordHash))fail_('อีเมลหรือรหัสผ่านไม่ถูกต้อง',401);
+    if(!account.verified)fail_('กรุณายืนยันอีเมลก่อน',403);
+    if(account.status!=='approved')fail_('บัญชีรออนุมัติหรือถูกระงับ กรุณาติดต่อเจ้าของร้าน',403);
+    return session_(auth,account);
+  }
+  if(action==='register'){
+    if(!validEmail_(email)||typeof b.name!=='string'||!b.name.trim()||b.name.length>120||typeof b.phone!=='string'||b.phone.length>40||!/^[a-f0-9]{64}$/.test(b.passwordProof||''))fail_('กรอกข้อมูลสมัครให้ครบถ้วน');
+    if(account)fail_('อีเมลนี้มีบัญชีแล้ว กรุณาเข้าสู่ระบบหรือลืมรหัสผ่าน');
+    if(auth.users.length>=100||!limited_('registration',30,86400)||!limited_('register:'+email,2,3600))fail_('คำขอสมัครเกินจำนวนที่รองรับ กรุณาติดต่อร้าน',429);
+    var user={id:Utilities.getUuid(),email:email,name:b.name.trim(),phone:b.phone.trim(),role:'staff',status:'pending',verified:0,created:new Date().toISOString(),passwordHash:proof_(b.passwordProof)};auth.users.push(user);
+    verification_(auth,user);mail_(auth,OWNER_,'สลาม โมบาย · คำขอสมัครพนักงานใหม่','ผู้สมัคร: '+user.name+'\nอีเมล: '+user.email+'\nเบอร์โทร: '+user.phone+'\nเปิดระบบ > บัญชีผู้ใช้ / พนักงาน เพื่ออนุมัติหรือปฏิเสธ\n'+PUBLIC_);return {message:'บันทึกคำขอแล้ว กรุณายืนยันอีเมล และรอเจ้าของร้านอนุมัติ',mail:flush_(auth)};
+  }
+  if(action==='verify'||action==='reset-password'){
+    var key=hash_(b.token||''),t=auth.tokens[key],purpose=action==='verify'?'verify':'reset';
+    if(!t||t.purpose!==purpose||t.expires<Date.now())fail_('ลิงก์ไม่ถูกต้อง หมดอายุ หรือใช้แล้ว');
+    var user=auth.users.filter(function(v){return v.id===t.userId})[0];if(!user)fail_('ไม่พบบัญชี');
+    if(action==='verify'){user.verified=1;user.updated=new Date().toISOString()}else{if(email!==user.email||!/^[a-f0-9]{64}$/.test(b.passwordProof||''))fail_('อีเมลหรือรหัสผ่านไม่ถูกต้อง');user.passwordHash=proof_(b.passwordProof);revoke_(auth,user.id)}
+    delete auth.tokens[key];return {message:action==='verify'?'ยืนยันอีเมลแล้ว หากได้รับอนุมัติ สามารถเข้าสู่ระบบได้':'เปลี่ยนรหัสผ่านแล้ว กรุณาเข้าสู่ระบบด้วยรหัสใหม่'};
+  }
+  if(action==='forgot'){
+    if(!validEmail_(email))fail_('อีเมลไม่ถูกต้อง');
+    if(!limited_('forgot:'+email,3,3600)||!limited_('forgot-global',30,86400))fail_('ส่งคำขอหลายครั้ง กรุณารอแล้วลองใหม่',429);
+    if(account){var token=token_();auth.tokens[hash_(token)]={userId:account.id,purpose:'reset',expires:Date.now()+3600000};mail_(auth,email,'สลาม โมบาย · ตั้งรหัสผ่านใหม่','ลิงก์ตั้งรหัสผ่านใหม่ มีอายุ 1 ชั่วโมง:\n'+link_('reset',token,email)+'\nหากไม่ได้ร้องขอ ไม่ต้องดำเนินการ');flush_(auth)}
+    return {message:'หากอีเมลนี้มีบัญชี ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ กรุณาตรวจ Inbox และสแปม'};
+  }
+  fail_('ไม่พบคำสั่ง');
+}
+
+function accessApi_(auth,b){
+  if(b.action==='flush-mail')return {message:'ดำเนินการคิวอีเมลแล้ว',mail:flush_(auth)};
+  if(b.action==='decision'){
+    var u=auth.users.filter(function(v){return v.id===b.id})[0];if(!u||u.role==='owner'||['approved','rejected','disabled'].indexOf(b.status)<0)fail_('คำสั่งไม่ถูกต้อง');
+    if(u.status===b.status)return {message:'สถานะเดิม ไม่มีการส่งอีเมลซ้ำ'};
+    u.status=b.status;u.updated=new Date().toISOString();revoke_(auth,u.id);
+    var label=b.status==='approved'?'อนุมัติแล้ว':b.status==='rejected'?'ไม่อนุมัติ':'ระงับบัญชี';
+    mail_(auth,u.email,'สลาม โมบาย · ผลสมัครพนักงาน: '+label,'คุณ '+u.name+'\nผลคำขอ: '+label+'\n'+(b.status==='approved'?'ยืนยันอีเมลแล้วสามารถเข้าสู่ระบบได้ที่ '+PUBLIC_:'ติดต่อเจ้าของร้าน '+OWNER_));return {message:label,mail:flush_(auth)};
+  }
+  if(b.action==='resend-verification'){
+    var user=auth.users.filter(function(v){return v.id===b.id&&v.role==='staff'})[0];if(!user||user.verified)fail_('ไม่มีบัญชีที่ต้องยืนยัน');
+    if(!limited_('verify:'+user.id,3,3600))fail_('กรุณารอก่อนส่งยืนยันใหม่',429);verification_(auth,user);return {message:'ส่งคำขอยืนยันใหม่แล้ว',mail:flush_(auth)};
+  }
+  fail_('ไม่พบคำสั่ง');
+}
