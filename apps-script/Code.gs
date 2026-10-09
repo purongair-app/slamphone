@@ -26,7 +26,7 @@ function setupMobileHub() {
 
 function fresh_(){var data={settings:{lineId:'',taxId:'',branch:'สำนักงานใหญ่',vatMode:'none',logo:'',signature:'',logoSize:'medium',receiptPaper:'80mm',jobPaper:'80mm',footer:'ขอบคุณที่ใช้บริการ',bank:'',accountNo:'',accountName:'',promptpay:'',paymentNote:'กรุณาตรวจสอบชื่อผู้รับเงินก่อนโอน',showPaymentQr:true,showLogo:true,autoPrint:false,costSource:'job',showCosts:true,enableAttendance:false,enablePayroll:false,defaultWarranty:'30 วัน',lineOaUrl:'',name:'สลาม โมบาย',phone:'',address:'',warranty:'รับประกันงานซ่อม 30 วัน เฉพาะอาการเดิม ไม่รวมตก กระแทก หรือโดนน้ำ'}};LISTS_.forEach(function(k){data[k]=[]});return data;}
 function read_(key){var id=PropertiesService.getScriptProperties().getProperty(key);if(!id)throw Error('ระบบยังไม่ได้ติดตั้ง');return JSON.parse(DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8'));}
-function write_(key,data){DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty(key)).setContent(JSON.stringify(data));}
+function write_(key,data){var props=PropertiesService.getScriptProperties(),sheetId=props.getProperty('SPREADSHEET_ID');if(sheetId){var book=SpreadsheetApp.openById(sheetId);if(key==='STORE_FILE_ID'){storeImages_(book,data.data);syncSheets_(book,data.data)}else if(key==='AUTH_FILE_ID'){syncAccounts_(book,data)}}DriveApp.getFileById(props.getProperty(key)).setContent(JSON.stringify(data));}
 function token_(){return Utilities.getUuid().replace(/-/g,'')+Utilities.getUuid().replace(/-/g,'');}
 function hex_(bytes){return bytes.map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2)}).join('');}
 function hash_(text){return hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(text),Utilities.Charset.UTF_8));}
