@@ -1,6 +1,7 @@
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import Page from './app/page';
+import {confirmedChange,needsConfirmation} from './lib/change-confirmation';
 const originalFetch=window.fetch.bind(window);
 let session=sessionStorage.getItem('mobilehub-session')??'';
 async function verifier(password:string,email:string){
@@ -12,9 +13,12 @@ window.fetch=async(input:any,init:any={})=>{
  if(typeof input!=='string'||!input.startsWith('/api/'))return originalFetch(input,init);
  const body=init.body?JSON.parse(init.body):{};
  if(body.password){const email=body.email||(window as any).MOBILEHUB_BOOT?.email||(window as any).mobilehubUserEmail;if(!email)throw Error('กรุณากรอกอีเมล');body.passwordProof=await verifier(body.password,email);delete body.password}
- const result:any=await new Promise((resolve,reject)=>{(window as any).google.script.run.withSuccessHandler(resolve).withFailureHandler((e:any)=>reject(Error(e.message??'เชื่อมต่อ Google ไม่สำเร็จ'))).api({path:input,method:init.method??'GET',body,session})});
+ const send=(request:any):Promise<any>=>new Promise((resolve,reject)=>{(window as any).google.script.run.withSuccessHandler(resolve).withFailureHandler((e:any)=>reject(Error(e.message??'เชื่อมต่อ Google ไม่สำเร็จ'))).api({...request,session})});
+ const request={path:input,method:init.method??'GET',body};
+ const result:any=needsConfirmation(request)?await confirmedChange(request,send):await send(request);
  if(result.body?.session){session=result.body.session;sessionStorage.setItem('mobilehub-session',session);delete result.body.session}
  if(result.body?.user)(window as any).mobilehubUserEmail=result.body.user.email;
+ if(result.body?.signOut){session='';sessionStorage.removeItem('mobilehub-session');window.dispatchEvent(new Event('mobilehub-auth'))}
  if(body.action==='logout'){session='';sessionStorage.removeItem('mobilehub-session')}
  return new Response(JSON.stringify(result.body),{status:result.status??200,headers:{'Content-Type':'application/json'}});
 };

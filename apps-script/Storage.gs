@@ -16,7 +16,7 @@ var SHEETS_ = {
  payroll:['เงินเดือนและค่าคอม','id:รหัสรายการ','employeeId:รหัสพนักงาน','name:ชื่อพนักงาน','month:เดือน','salary:เงินเดือน','commission:ค่าคอมมิชชัน','total:ยอดรวม','status:สถานะ','date:วันที่บันทึก']
 };
 function setupSheetsAndPhotos(){
- if(Session.getActiveUser().getEmail().toLowerCase()!==OWNER_)throw Error('ต้องเรียกใช้จากบัญชีเจ้าของร้านเท่านั้น');
+ if(Session.getActiveUser().getEmail().toLowerCase()!==STORAGE_ACCOUNT_)throw Error('ต้องเรียกใช้จากบัญชีเจ้าของร้านเท่านั้น');
  var lock=LockService.getScriptLock();lock.waitLock(30000);
  try{
   var p=PropertiesService.getScriptProperties(),root=DriveApp.getFolderById(p.getProperty('FOLDER_ID'));
@@ -31,7 +31,7 @@ function setupSheetsAndPhotos(){
   }
   book.setSpreadsheetTimeZone('Asia/Bangkok');book.setSpreadsheetLocale('th_TH');
   var info=book.getSheetByName('ข้อมูลระบบ')||book.insertSheet('ข้อมูลระบบ');
-  info.getRange(1,1,6,2).setValues([['รายการ','รายละเอียด'],['ชื่อระบบ','MobileHub สลาม โมบาย'],['เจ้าของร้าน',OWNER_],['เว็บหน้าร้าน',PUBLIC_],['โฟลเดอร์รูปภาพ',imageRoot.getUrl()],['รูปแบบบันทึก','บันทึกจากเว็บแอป ห้ามแก้ตารางโดยตรงระหว่างใช้งาน']]);style_(info,2);
+  info.getRange(1,1,6,2).setValues([['รายการ','รายละเอียด'],['ชื่อระบบ','MobileHub สลาม โมบาย'],['เจ้าของร้าน',ownerEmail_()],['เว็บหน้าร้าน',PUBLIC_],['โฟลเดอร์รูปภาพ',imageRoot.getUrl()],['รูปแบบบันทึก','บันทึกจากเว็บแอป ห้ามแก้ตารางโดยตรงระหว่างใช้งาน']]);style_(info,2);
   var data=read_('STORE_FILE_ID');syncSheets_(book,data.data);syncAccounts_(book,read_('AUTH_FILE_ID'));
   var photos=book.getSheetByName('รูปภาพ')||book.insertSheet('รูปภาพ');if(photos.getLastRow()===0){photos.getRange(1,1,1,6).setValues([['รหัสรูปภาพ','ชื่อไฟล์','หมวดรูปภาพ','ตำแหน่งข้อมูล','ลิงก์ไฟล์','วันที่บันทึก']]);style_(photos,6)}
   var empty=book.getSheetByName('Sheet1')||book.getSheetByName('ชีต1');if(empty&&empty.getLastRow()===0&&book.getSheets().length>1)book.deleteSheet(empty);
