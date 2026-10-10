@@ -1,0 +1,4 @@
+import type {InputHTMLAttributes} from 'react';
+import {formatPhoneInput} from '@/lib/phone';
+type Props=Omit<InputHTMLAttributes<HTMLInputElement>,'value'|'onChange'|'type'> & {value:unknown;onChange:(value:string)=>void};
+export default function PhoneInput({value,onChange,...props}:Props){return <input {...props} type="tel" inputMode="numeric" autoComplete="tel-national" placeholder="000-0000000" pattern="[0-9]{3}-[0-9]{7}" title="กรุณากรอกเบอร์โทร 10 หลัก เช่น 000-0000000" value={formatPhoneInput(value)} onChange={e=>{const input=e.currentTarget,position=input.selectionStart??input.value.length;const digitsBefore=input.value.slice(0,position).replace(/[^0-9]/g,'').length;const next=formatPhoneInput(input.value);onChange(next);requestAnimationFrame(()=>{if(document.activeElement===input){const caret=Math.min(next.length,digitsBefore+(digitsBefore>3?1:0));input.setSelectionRange(caret,caret);}});}}/>;}
