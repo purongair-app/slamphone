@@ -5,8 +5,10 @@ var LISTS_ = ['repairs','products','sales','customers','finance','employees','se
 
 function doGet(e) {
   var p = (e && e.parameter) || {};
+  if (p.action === 'storefront') return storefrontJson_();
+  if (p.page === 'storefront-admin') return HtmlService.createHtmlOutputFromFile('StorefrontAdmin').setTitle('จัดการหน้าร้าน SLAM PHONE').addMetaTag('viewport','width=device-width,initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   var boot = {mode:['login','register','verify','reset'].indexOf(p.mode)>=0?p.mode:'login',token:String(p.token||'').slice(0,100),email:String(p.email||'').slice(0,254)};
-  var html = '<!doctype html><html lang="th"><head><base target="_blank"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="'+PUBLIC_+'styles.css?v=1"></head><body><div id="root"><p style="text-align:center;padding:50px;font-family:Tahoma">กำลังเปิดระบบ สลาม โมบาย…</p></div><script>window.MOBILEHUB_BOOT='+JSON.stringify(boot).replace(/</g,'\\u003c')+';</script><script src="'+PUBLIC_+'app.js?v=20261010-phone"></script></body></html>';
+  var html = '<!doctype html><html lang="th"><head><base target="_blank"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="'+PUBLIC_+'styles.css?v=1"></head><body><div id="root"><p style="text-align:center;padding:50px;font-family:Tahoma">กำลังเปิดระบบ สลาม โมบาย…</p></div><script>window.MOBILEHUB_BOOT='+JSON.stringify(boot).replace(/</g,'\\u003c')+';</script><script src="'+PUBLIC_+'app.js?v=1"></script></body></html>';
   return HtmlService.createHtmlOutput(html).setTitle('สลาม โมบาย · MobileHub').addMetaTag('viewport','width=device-width,initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -36,7 +38,7 @@ function email_(v){return String(v||'').trim().toLowerCase();}
 function validEmail_(s){return s.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(s);}
 function fail_(message,status){var e=new Error(message);e.status=status||400;throw e;}
 function limited_(key,limit,seconds){var c=CacheService.getScriptCache(),k='limit:'+hash_(key),n=Number(c.get(k)||0);if(n>=limit)return false;c.put(k,String(n+1),seconds||900);return true;}
-function cleanUser_(u){return {id:u.id,email:u.email,name:u.name,phone:u.phone,role:u.role,status:u.status,verified:u.verified,created:u.created,updated:u.updated,deletedAt:u.deletedAt};}
+function cleanUser_(u){return {id:u.id,email:u.email,name:u.name,phone:u.phone,role:u.role,status:u.status,verified:u.verified,created:u.created,updated:u.updated};}
 function authUser_(auth,session){var s=auth.sessions[hash_(session||'')];if(!s||s.expires<Date.now())return null;var u=auth.users.filter(function(v){return v.id===s.userId})[0];return u&&u.status==='approved'&&u.verified?u:null;}
 function session_(auth,u){var t=token_();auth.sessions[hash_(t)]={userId:u.id,expires:Date.now()+21600000};return {user:cleanUser_(u),session:t};}
 function revoke_(auth,id){Object.keys(auth.sessions).forEach(function(k){if(auth.sessions[k].userId===id)delete auth.sessions[k]});}
@@ -172,4 +174,36 @@ function accessApi_(auth,b){
     if(!limited_('verify:'+user.id,3,3600))fail_('กรุณารอก่อนส่งยืนยันใหม่',429);verification_(auth,user);return {message:'ส่งคำขอยืนยันใหม่แล้ว',mail:flush_(auth)};
   }
   fail_('ไม่พบคำสั่ง');
+}
+
+
+/* Read-only storefront projection. Add one dispatch line in existing doGet after p is defined:
+   if (p.action === 'storefront') return storefrontJson_();
+   Never replace the existing authentication or store API. */
+function storefrontJson_() {
+  try {
+    var state = read_('STORE_FILE_ID'), data = state.data, s = data.settings || {};
+    var text = function(v, max) { return String(v || '').slice(0, max || 200); };
+    var safeImage = function(v) { v = String(v || ''); return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length < 2800000 ? v : /^https:\/\//.test(v) && v.length < 2000 ? v : ''; };
+    var result = {
+      schema: 'slamphone-storefront-v1',
+      content: storefrontContent_(s.storefront || {}, text, safeImage),
+      shop: {name:text(s.name),phone:text(s.phone,80),address:text(s.address,500),lineUrl:/^https:\/\/(lin\.ee|line\.me)\//.test(s.lineOaUrl || '') ? text(s.lineOaUrl,500) : '',logo:safeImage(s.logo)},
+      products: (data.products || []).filter(function(p) { return p && ['มือถือ','อุปกรณ์เสริม'].indexOf(p.category) >= 0 && p.showOnStorefront === true; }).slice(0,200).map(function(p) {
+        return {id:text(p.id,100),name:text(p.name),brand:text(p.brand),model:text(p.model),category:text(p.category,50),condition:text(p.condition,50),price: typeof p.price === 'number' && isFinite(p.price) && p.price >= 0 ? p.price : null,available:Number(p.stock)>0,image:safeImage(p.image || p.photo)};
+      })
+    };
+    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  } catch(e) {
+    return ContentService.createTextOutput(JSON.stringify({schema:'slamphone-storefront-v1',error:'ไม่สามารถโหลดหน้าร้านได้ในขณะนี้'})).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function storefrontContent_(site, text, image) {
+  var result = {}, limits = {brand:80,topbar:200,eyebrow:100,heroTitle:100,heroAccent:100,heroButton:80,heroDescription:600,productsTitle:100,productsDescription:300,repairTitle:150,contactTitle:150,repairDescription:600,promotion:500,email:254,hours:200};
+  Object.keys(limits).forEach(function(k) { result[k] = text(site[k], limits[k]); });
+  result.heroImage = image(site.heroImage); result.promotionImage = image(site.promotionImage);
+  result.mapUrl = /^https:\/\/(maps\.app\.goo\.gl|goo\.gl|maps\.google\.com|www\.google\.com|google\.com)\//.test(site.mapUrl || '') ? text(site.mapUrl,2000) : '';
+  result.posts = Array.isArray(site.posts) ? site.posts.filter(function(p) { return p && p.published === true && ['reviews','new','used','repairs'].indexOf(p.type) >= 0; }).slice(0,100).map(function(p) { return {id:text(p.id,100),type:text(p.type,20),title:text(p.title,200),description:text(p.description,2000),image:image(p.image)}; }) : [];
+  return result;
 }
