@@ -6,7 +6,7 @@ var LISTS_ = ['repairs','products','sales','customers','finance','employees','se
 function doGet(e) {
   var p = (e && e.parameter) || {};
   var boot = {mode:['login','register','verify','reset'].indexOf(p.mode)>=0?p.mode:'login',token:String(p.token||'').slice(0,100),email:String(p.email||'').slice(0,254)};
-  var html = '<!doctype html><html lang="th"><head><base target="_blank"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="'+PUBLIC_+'styles.css?v=1"></head><body><div id="root"><p style="text-align:center;padding:50px;font-family:Tahoma">กำลังเปิดระบบ สลาม โมบาย…</p></div><script>window.MOBILEHUB_BOOT='+JSON.stringify(boot).replace(/</g,'\\u003c')+';</script><script src="'+PUBLIC_+'app.js?v=1"></script></body></html>';
+  var html = '<!doctype html><html lang="th"><head><base target="_blank"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="'+PUBLIC_+'styles.css?v=1"></head><body><div id="root"><p style="text-align:center;padding:50px;font-family:Tahoma">กำลังเปิดระบบ สลาม โมบาย…</p></div><script>window.MOBILEHUB_BOOT='+JSON.stringify(boot).replace(/</g,'\\u003c')+';</script><script src="'+PUBLIC_+'app.js?v=20261010-phone"></script></body></html>';
   return HtmlService.createHtmlOutput(html).setTitle('สลาม โมบาย · MobileHub').addMetaTag('viewport','width=device-width,initial-scale=1').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
