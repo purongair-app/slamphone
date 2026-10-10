@@ -36,7 +36,7 @@ function email_(v){return String(v||'').trim().toLowerCase();}
 function validEmail_(s){return s.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(s);}
 function fail_(message,status){var e=new Error(message);e.status=status||400;throw e;}
 function limited_(key,limit,seconds){var c=CacheService.getScriptCache(),k='limit:'+hash_(key),n=Number(c.get(k)||0);if(n>=limit)return false;c.put(k,String(n+1),seconds||900);return true;}
-function cleanUser_(u){return {id:u.id,email:u.email,name:u.name,phone:u.phone,role:u.role,status:u.status,verified:u.verified,created:u.created,updated:u.updated};}
+function cleanUser_(u){return {id:u.id,email:u.email,name:u.name,phone:u.phone,role:u.role,status:u.status,verified:u.verified,created:u.created,updated:u.updated,deletedAt:u.deletedAt};}
 function authUser_(auth,session){var s=auth.sessions[hash_(session||'')];if(!s||s.expires<Date.now())return null;var u=auth.users.filter(function(v){return v.id===s.userId})[0];return u&&u.status==='approved'&&u.verified?u:null;}
 function session_(auth,u){var t=token_();auth.sessions[hash_(t)]={userId:u.id,expires:Date.now()+21600000};return {user:cleanUser_(u),session:t};}
 function revoke_(auth,id){Object.keys(auth.sessions).forEach(function(k){if(auth.sessions[k].userId===id)delete auth.sessions[k]});}
@@ -139,16 +139,36 @@ function authApi_(auth,u,b,method,session){
 }
 
 function accessApi_(auth,b){
+  if(['edit-user','delete-user','restore-user'].indexOf(b.action)>=0){
+    var user=auth.users.filter(function(v){return v.id===b.id&&v.role==='staff'})[0];
+    if(!user)fail_('ไม่พบคำขอพนักงาน',404);
+    if(b.action==='edit-user'){
+      if(user.status==='deleted')fail_('กรุณากู้คืนคำขอก่อนแก้ไข');
+      var name=typeof b.name==='string'?b.name.trim():'',phone=typeof b.phone==='string'?b.phone.trim():'';
+      if(!name||name.length>120||!/^\d{3}-?\d{7}$/.test(phone))fail_('กรอกชื่อและเบอร์โทร 10 หลักให้ถูกต้อง');
+      user.name=name;user.phone=phone.replace(/-/g,'').replace(/^(\d{3})(\d{7})$/,'$1-$2');
+    }else if(b.action==='delete-user'){
+      if(b.confirmation!=='ลบคำขอพนักงาน')fail_('กรุณายืนยันการลบ');
+      user.status='deleted';user.deletedAt=new Date().toISOString();revoke_(auth,user.id);
+      Object.keys(auth.tokens).forEach(function(k){if(auth.tokens[k].userId===user.id)delete auth.tokens[k]});
+      auth.mails.forEach(function(m){if(m.recipient===user.email&&m.status!=='sent'){m.status='cancelled';delete m.body}});
+    }else{
+      if(user.status!=='deleted')fail_('คำขอนี้ไม่ได้ถูกลบ');
+      user.status='disabled';delete user.deletedAt;
+    }
+    user.updated=new Date().toISOString();
+    return {message:b.action==='edit-user'?'แก้ไขคำขอพนักงานแล้ว':b.action==='delete-user'?'ลบคำขอแล้ว สามารถกู้คืนได้':'กู้คืนแล้ว บัญชียังระงับอยู่จนกว่าเจ้าของร้านจะอนุมัติ'};
+  }
   if(b.action==='flush-mail')return {message:'ดำเนินการคิวอีเมลแล้ว',mail:flush_(auth)};
   if(b.action==='decision'){
-    var u=auth.users.filter(function(v){return v.id===b.id})[0];if(!u||u.role==='owner'||['approved','rejected','disabled'].indexOf(b.status)<0)fail_('คำสั่งไม่ถูกต้อง');
+    var u=auth.users.filter(function(v){return v.id===b.id})[0];if(!u||u.role==='owner'||u.status==='deleted'||['approved','rejected','disabled'].indexOf(b.status)<0)fail_('คำสั่งไม่ถูกต้อง');
     if(u.status===b.status)return {message:'สถานะเดิม ไม่มีการส่งอีเมลซ้ำ'};
     u.status=b.status;u.updated=new Date().toISOString();revoke_(auth,u.id);
     var label=b.status==='approved'?'อนุมัติแล้ว':b.status==='rejected'?'ไม่อนุมัติ':'ระงับบัญชี';
     mail_(auth,u.email,'สลาม โมบาย · ผลสมัครพนักงาน: '+label,'คุณ '+u.name+'\nผลคำขอ: '+label+'\n'+(b.status==='approved'?'ยืนยันอีเมลแล้วสามารถเข้าสู่ระบบได้ที่ '+PUBLIC_:'ติดต่อเจ้าของร้าน '+OWNER_));return {message:label,mail:flush_(auth)};
   }
   if(b.action==='resend-verification'){
-    var user=auth.users.filter(function(v){return v.id===b.id&&v.role==='staff'})[0];if(!user||user.verified)fail_('ไม่มีบัญชีที่ต้องยืนยัน');
+    var user=auth.users.filter(function(v){return v.id===b.id&&v.role==='staff'})[0];if(!user||user.status==='deleted'||user.verified)fail_('ไม่มีบัญชีที่ต้องยืนยัน');
     if(!limited_('verify:'+user.id,3,3600))fail_('กรุณารอก่อนส่งยืนยันใหม่',429);verification_(auth,user);return {message:'ส่งคำขอยืนยันใหม่แล้ว',mail:flush_(auth)};
   }
   fail_('ไม่พบคำสั่ง');
