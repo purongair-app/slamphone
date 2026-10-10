@@ -15,7 +15,9 @@ window.fetch=async(input:any,init:any={})=>{
  if(body.password){const email=body.email||(window as any).MOBILEHUB_BOOT?.email||(window as any).mobilehubUserEmail;if(!email)throw Error('กรุณากรอกอีเมล');body.passwordProof=await verifier(body.password,email);delete body.password}
  const send=(request:any):Promise<any>=>new Promise((resolve,reject)=>{(window as any).google.script.run.withSuccessHandler(resolve).withFailureHandler((e:any)=>reject(Error(e.message??'เชื่อมต่อ Google ไม่สำเร็จ'))).api({...request,session})});
  const request={path:input,method:init.method??'GET',body};
- const result:any=needsConfirmation(request)?await confirmedChange(request,send):await send(request);
+ let result:any=needsConfirmation(request)?await confirmedChange(request,send):await send(request);
+ // Compatibility: existing Apps Script deployments may still require the old OTP until the backend is redeployed.
+ if(request.path==='/api/store'&&request.method==='PUT'&&result.status===428)result=await confirmedChange(request,send);
  if(result.body?.session){session=result.body.session;sessionStorage.setItem('mobilehub-session',session);delete result.body.session}
  if(result.body?.user)(window as any).mobilehubUserEmail=result.body.user.email;
  if(result.body?.signOut){session='';sessionStorage.removeItem('mobilehub-session');window.dispatchEvent(new Event('mobilehub-auth'))}
