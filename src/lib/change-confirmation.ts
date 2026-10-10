@@ -1,7 +1,7 @@
 type Request={path:string;method:string;body:Record<string,any>};
 type Result={status:number;body:any};
 type Send=(r:Request)=>Promise<Result>;
-export function needsConfirmation(r:Request){return (r.path==='/api/store'&&r.method==='PUT')||(r.path.startsWith('/api/admin/')&&r.method!=='GET')||(r.path==='/api/auth'&&r.body.action==='owner-password')}
+export function needsConfirmation(r:Request){return (r.path.startsWith('/api/admin/')&&r.method!=='GET')||(r.path==='/api/auth'&&r.body.action==='owner-password')}
 export async function confirmedChange(request:Request,send:Send):Promise<Result>{
  const issue=()=>send({path:'/api/security',method:'POST',body:{target:request}});
  let challenge=await issue();if(challenge.status!==200)return challenge;
