@@ -72,7 +72,8 @@ function api(request){
       if(method!=='PUT'||!Number.isSafeInteger(b.revision)||!validateStore_(b.data))fail_('ข้อมูลไม่ถูกต้อง');
       if(store.revision!==b.revision)fail_('ข้อมูลเปลี่ยนจากอีกอุปกรณ์ กรุณาโหลดใหม่แล้วทำรายการอีกครั้ง',409);
       if(u.role!=='owner'&&['settings','employees','prices'].some(function(k){return JSON.stringify(b.data[k])!==JSON.stringify(store.data[k])}))fail_('เฉพาะเจ้าของร้านแก้ข้อมูลร้าน พนักงาน และราคาซ่อมได้',403);
-      consumeChangeCode_(request,u);store={revision:store.revision+1,data:b.data};write_('STORE_FILE_ID',store);return {status:200,body:store};
+      // Routine business records save with an authenticated session, current revision, and role checks; no per-save email OTP.
+      store={revision:store.revision+1,data:b.data};write_('STORE_FILE_ID',store);return {status:200,body:store};
     }
     if(path==='/api/integrations')return {status:200,body:{lineConfigured:false}};
     requireOwner_(u);
@@ -231,7 +232,6 @@ function configureOwnership(){
 function canonical_(v){if(Array.isArray(v))return '['+v.map(canonical_).join(',')+']';if(v&&typeof v==='object')return '{'+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+':'+canonical_(v[k])}).join(',')+'}';return JSON.stringify(v);}
 function changeFingerprint_(path,method,body){var clean={};Object.keys(body).forEach(function(k){if(['changeId','changeCode','newEmailCode'].indexOf(k)<0)clean[k]=body[k]});return hash_(path+'|'+method+'|'+canonical_(clean));}
 function changeTarget_(u,path,method,body){
-  if(path==='/api/store'&&method==='PUT')return 'บันทึกข้อมูลร้าน';
   requireOwner_(u);
   if(path==='/api/admin/access'&&method==='POST')return 'จัดการคำขอพนักงาน / อีเมล';
   if(path==='/api/admin/reset'&&method==='POST')return 'ล้างข้อมูลร้านทั้งหมด';
