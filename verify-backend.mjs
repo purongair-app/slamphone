@@ -18,7 +18,9 @@ assert.equal(call('/api/auth','POST',{action:'owner-verify',code}).status,401);
 assert.equal(call('/api/admin/access','GET',{},owner).body.ownerEmail,'niasae.purong@gmail.com');
 let state=call('/api/store','GET',{},owner).body;
 state.data.customers.push({id:'test-customer',name:'ทดสอบ',phone:'0000000000'});
-assert.equal(confirmed('/api/store','PUT',state,owner).status,200);assert.equal(confirmed('/api/store','PUT',state,owner).status,409);
+const mailsBeforeStoreSave=sent.length;
+assert.equal(call('/api/store','PUT',state,owner).status,200);assert.equal(call('/api/store','PUT',state,owner).status,409);
+assert.equal(sent.length,mailsBeforeStoreSave,'Routine saves must not send verification email');
 const email='staff@example.test',passwordProof='a'.repeat(64);
 assert.equal(call('/api/auth','POST',{action:'register',email,name:'ทดสอบพนักงาน',phone:'0000000000',passwordProof,role:'owner',status:'approved'}).status,200);
 const auth=JSON.parse(files[properties.AUTH_FILE_ID].text),staff=auth.users.find(u=>u.email===email);assert.equal(staff.role,'staff');assert.equal(staff.status,'pending');
@@ -29,8 +31,8 @@ assert.equal(call('/api/auth','POST',{action:'login',email,passwordProof}).statu
 assert.equal(confirmed('/api/admin/access','POST',{action:'decision',id:staff.id,status:'approved'},owner).status,200);
 const staffSession=call('/api/auth','POST',{action:'login',email,passwordProof}).body.session;assert(staffSession);
 assert.equal(call('/api/admin/access','GET',{},staffSession).status,403);
-state=call('/api/store','GET',{},staffSession).body;state.data.settings.phone='should-deny';assert.equal(confirmed('/api/store','PUT',state,staffSession).status,403);
-state=call('/api/store','GET',{},staffSession).body;state.data.customers.push({id:'staff-test',name:'ทดสอบบันทึกจากพนักงาน'});assert.equal(confirmed('/api/store','PUT',state,staffSession).status,200);
+state=call('/api/store','GET',{},staffSession).body;state.data.settings.phone='should-deny';assert.equal(call('/api/store','PUT',state,staffSession).status,403);
+state=call('/api/store','GET',{},staffSession).body;state.data.customers.push({id:'staff-test',name:'ทดสอบบันทึกจากพนักงาน'});assert.equal(call('/api/store','PUT',state,staffSession).status,200);
 assert.equal(confirmed('/api/admin/access','POST',{action:'edit-user',id:staff.id,name:'แก้ไข',phone:'081-1234567'},staffSession).status,403);
 assert.equal(confirmed('/api/admin/access','POST',{action:'edit-user',id:staff.id,name:'แก้ไข',phone:'123'},owner).status,400);
 assert.equal(confirmed('/api/admin/access','POST',{action:'edit-user',id:staff.id,name:'แก้ไข',phone:'0811234567'},owner).status,200);
@@ -52,19 +54,24 @@ state=call('/api/store','GET',{},owner).body;assert.equal(confirmed('/api/admin/
 assert.equal(call('/api/store','GET',{},owner).body.data.customers.length,0);assert(Object.values(files).some(f=>f.name.startsWith('backup-before-reset-')));
 console.log('PASS: persistence, revision conflicts, owner OTP, registration, email verification, approval, staff permissions, session revocation, password reset, and backed-up system reset');
 
-// Confirmation cannot be bypassed, replayed, moved to another payload/session, or used after expiry.
+// Regular business updates bypass OTP, but authentication, access and account changes remain protected.
 state=call('/api/store','GET',{},owner).body;
-assert.equal(call('/api/store','PUT',state,owner).status,428);
-const target={path:'/api/store',method:'PUT',body:state};
+const sentBeforeRoutineUpdate=sent.length;
+assert.equal(call('/api/store','PUT',state,owner).status,200);
+assert.equal(sent.length,sentBeforeRoutineUpdate,'Normal store updates must not send codes');
+assert.equal(call('/api/security','POST',{target:{path:'/api/store',method:'PUT',body:state}},owner).status,400);
+
+const target={path:'/api/auth',method:'POST',body:{action:'owner-password',passwordProof:'c'.repeat(64)}};
+assert.equal(call('/api/auth','POST',target.body,owner).status,428);
 let issue=call('/api/security','POST',{target},owner);let otp=sent.at(-1).body.match(/รหัสยืนยัน: (\d{6})/)[1];
-let payload={...state,changeId:issue.body.changeId,changeCode:otp};
-assert.equal(call('/api/store','PUT',{...payload,data:{...state.data,settings:{...state.data.settings,name:'tampered'}}},owner).status,428);
-assert.equal(call('/api/store','PUT',{...payload,changeCode:'wrong'},owner).status,428);
-assert.equal(call('/api/store','PUT',payload,owner).status,200);
-state=call('/api/store','GET',{},owner).body;assert.equal(call('/api/store','PUT',{...state,changeId:issue.body.changeId,changeCode:otp},owner).status,428);
-issue=call('/api/security','POST',{target:{...target,body:state}},owner);otp=sent.at(-1).body.match(/รหัสยืนยัน: (\d{6})/)[1];
+let payload={...target.body,changeId:issue.body.changeId,changeCode:otp};
+assert.equal(call('/api/auth','POST',{...payload,passwordProof:'d'.repeat(64)},owner).status,428);
+assert.equal(call('/api/auth','POST',{...payload,changeCode:'wrong'},owner).status,428);
+assert.equal(call('/api/auth','POST',payload,owner).status,200);
+assert.equal(call('/api/auth','POST',payload,owner).status,428);
+issue=call('/api/security','POST',{target},owner);otp=sent.at(-1).body.match(/รหัสยืนยัน: (\d{6})/)[1];
 cache.get('change:'+context.hash_(issue.body.changeId)).expires=Date.now()-1;
-assert.equal(call('/api/store','PUT',{...state,changeId:issue.body.changeId,changeCode:otp},owner).status,428);
+assert.equal(call('/api/auth','POST',{...target.body,changeId:issue.body.changeId,changeCode:otp},owner).status,428);
 assert.equal(call('/api/admin/owner','POST',{email:'new-owner@example.test'},owner).status,428);
 assert.equal(confirmed('/api/admin/owner','POST',{email:'new-owner@example.test'},owner).status,200);
 assert.equal(call('/api/store','GET',{},owner).status,401);
@@ -72,7 +79,7 @@ assert.equal(call('/api/auth').body.ownerEmail,'new-owner@example.test');
 assert.equal(call('/api/auth','POST',{action:'login',email:'niasae.purong@gmail.com',passwordProof:'c'.repeat(64)}).status,401);
 const accounts=JSON.parse(files[properties.AUTH_FILE_ID].text).users;assert.equal(accounts.filter(u=>u.role==='owner').length,1);assert.equal(accounts.find(u=>u.role==='owner').email,'new-owner@example.test');
 assert.equal(properties.AUTH_FILE_ID,'1');assert.equal(properties.STORE_FILE_ID,'2');
-console.log('PASS: single owner, storage retention, per-change OTP, payload binding, wrong code, expiry, replay protection, dual mailbox transfer and session revocation');
+console.log('PASS: routine no-OTP save, account-only OTP, tamper protection, expiry, replay protection, and owner transfer');
 
 // Existing storage owner is retired, without touching stored business data or granting a pre-registered password.
 const businessBefore=files[properties.STORE_FILE_ID].text;
